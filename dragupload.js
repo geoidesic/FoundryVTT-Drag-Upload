@@ -317,15 +317,31 @@ async function CreateJournalPin(event, file) {
         pageTypes.forEach(x => {
             d.data.buttons[x] = {
                 label: x,
-                callback: async () => await CreateJournalPageWithType(journal, response, cleanName(file.name), x)
+                callback: async () => await CreateJournalPageWithType(journal, response, cleanName(file.name), x, event)
             }
         });
 
         d.render(true);
     }
     else {
-        await CreateJournalPageWithType(journal, response, cleanName(file.name), pageTypes[0]);
+        await CreateJournalPageWithType(journal, response, cleanName(file.name), pageTypes[0], event);
     }
+}
+
+async function CreateJournalPageWithType(journal, response, pageName, type, event) {
+    const pageData = {
+        name: pageName
+    };
+
+    if (type === "image") {
+        pageData.type = "image";
+        pageData.src = response.path;
+    } else if (type === "text") {
+        pageData.type = "text";
+        pageData.text = { content: `<img src="${response.path}" />` };
+    }
+
+    await journal.createEmbeddedDocuments("JournalEntryPage", [pageData]);
 
     const pinData = {
         entryId: journal.id,
@@ -341,22 +357,6 @@ async function CreateJournalPin(event, file) {
     // Activate Notes layer (if not already active)
     canvas.notes.activate();
     return canvas.scene.createEmbeddedDocuments('Note', [pinData], {});
-}
-
-async function CreateJournalPageWithType(journal, response, pageName, type) {
-    const pageData = {
-        name: pageName
-    };
-
-    if (type === "image") {
-        pageData.type = "image";
-        pageData.src = response.path;
-    } else if (type === "text") {
-        pageData.type = "text";
-        pageData.text = { content: `<img src="${response.path}" />` };
-    }
-
-    await journal.createEmbeddedDocuments("JournalEntryPage", [pageData]);
 }
 
 async function CreateActor(event, file) {
