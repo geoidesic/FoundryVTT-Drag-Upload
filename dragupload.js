@@ -123,7 +123,7 @@ async function handleDrop(event) {
         if (!url) {
             console.log("DragUpload | No Files detected, exiting");
             // Let Foundry handle the event instead
-            canvas._onDrop(event);
+            canvas._onDrop?.(event);
             return;
         }
         // trimming query string
@@ -133,7 +133,7 @@ async function handleDrop(event) {
         if (!filename.includes(".")) {
             console.log("DragUpload | Dragged non-file text:", url);
             // Let Foundry handle the event instead
-            canvas._onDrop(event);
+            canvas._onDrop?.(event);
             return
         }
         const extension = filename.substr(filename.lastIndexOf(".") + 1)
@@ -144,7 +144,7 @@ async function handleDrop(event) {
         if (!validExtensions.includes(extension)) {
             console.log("DragUpload | Dragged file with bad extension:", url);
             // Let Foundry handle the event instead
-            canvas._onDrop(event);
+            canvas._onDrop?.(event);
             return
         }
         // special case: chrome imgur drag from an album gives a low-res webp file instead of a PNG
@@ -163,7 +163,7 @@ async function handleDrop(event) {
         console.log("Drag Upload | No Files detected");
 
         // Let Foundry handle the event instead
-        canvas._onDrop(event);
+        canvas._onDrop?.(event);
         return;
     }
     console.debug("file is: ");
@@ -219,7 +219,7 @@ async function CreateAmbientAudio(event, file) {
 
     convertXYtoCanvas(data, event);
 
-    canvas.sounds.activate();
+    canvas.ambientSounds.activate();
     await canvas.scene.createEmbeddedDocuments("AmbientSound", [data]);
 }
 
@@ -261,12 +261,9 @@ async function CreateTile(event, file, overhead) {
         }
     }
     else {
-        if ( overhead ) {
-            ui.controls.controls.find(c => c.name === "tiles").foreground = true;
-        } else {
-            ui.controls.controls.find(c => c.name === "tiles").foreground = false;
-        }
-        canvas.perception.update({refreshLighting: true, refreshTiles: true}, true);
+        canvas.tiles.activate();
+        canvas.tiles.foreground = overhead;
+        canvas.perception.update({refreshTiles: true});
     }
     return canvas.scene.createEmbeddedDocuments('Tile', [data], {});
 }
@@ -283,13 +280,41 @@ async function CreateJournalPin(event, file) {
     console.debug(response);
 
     const data = {
-        name: file.name,
+        name: cleanName(file.name),
         img: response.path
     };
 
     const journal = await JournalEntry.create(data);
     console.debug("Created journal entry: ");
     console.debug(journal);
+
+    // Choose page type
+    const pageTypes = ["image", "text"];
+
+    if (pageTypes.length > 1) {
+        let d = new Dialog({
+            title: "What Type should this Journal Page be created as?",
+            buttons: {},
+            default: pageTypes[0],
+            close: () => {}
+        }, {
+            width: 400
+        });
+        console.debug("Creating dialog: ");
+        console.debug(d);
+
+        pageTypes.forEach(x => {
+            d.data.buttons[x] = {
+                label: x,
+                callback: async () => await CreateJournalPageWithType(journal, response, cleanName(file.name), x)
+            }
+        });
+
+        d.render(true);
+    }
+    else {
+        await CreateJournalPageWithType(journal, response, cleanName(file.name), pageTypes[0]);
+    }
 
     const pinData = {
         entryId: journal.id,
@@ -307,6 +332,22 @@ async function CreateJournalPin(event, file) {
     return canvas.scene.createEmbeddedDocuments('Note', [pinData], {});
 }
 
+async function CreateJournalPageWithType(journal, response, pageName, type) {
+    const pageData = {
+        name: pageName
+    };
+
+    if (type === "image") {
+        pageData.type = "image";
+        pageData.src = response.path;
+    } else if (type === "text") {
+        pageData.type = "text";
+        pageData.text = { content: `<img src="${response.path}" />` };
+    }
+
+    await journal.createEmbeddedDocuments("JournalEntryPage", [pageData]);
+}
+
 async function CreateActor(event, file) {
     const source = game.settings.get("dragupload", "fileUploadSource");
     let response
@@ -319,7 +360,7 @@ async function CreateActor(event, file) {
     console.debug(response);
 
     const data = CreateImgData(event, response);
-    data.name = file.name;
+    data.name = cleanName(file.name);
     const tokenData = CreateImgData(event, response);
 
     if (Object.keys(CONST.IMAGE_FILE_EXTENSIONS).filter(x => file.name.endsWith(x)).length == 0) {
@@ -338,8 +379,10 @@ async function CreateActor(event, file) {
         let d = new Dialog({
             title: "What Type should this Actor be created as?",
             buttons: {},
-            default: types[0],
+            default: types[0],            
             close: () => {}
+           }, {
+            width: 800
            });
            console.debug("Creating dialog: ");
            console.debug(d);
@@ -367,9 +410,6 @@ async function CreateActorWithType(event, data, tokenImageData, type) {
     }
 
     let actorName = data.name;
-    if (actorName.includes(".")) {
-        actorName = actorName.split(".")[0];
-    }
 
     const actor = await getDocumentClass("Actor").create(
     {
@@ -418,7 +458,7 @@ async function CreateActorWithType(event, data, tokenImageData, type) {
     tokenData.actorLink = true;
 
     // Submit the Token creation request and activate the Tokens layer (if not already active)
-    canvas.getLayerByEmbeddedName("Token").activate();
+    canvas.tokens.activate();
     await canvas.scene.createEmbeddedDocuments('Token', [tokenData], {});
 
     // delete actor if it's actorless
@@ -437,13 +477,24 @@ function CreateImgData(event, response) {
     return data;
 }
 
+function cleanName(filename) {
+    let name = filename;
+    // Remove extension
+    if (name.includes(".")) {
+        name = name.split(".")[0];
+    }
+    // Replace underscores and dashes with spaces
+    name = name.replace(/_/g, " ").replace(/-/g, " ");
+    return name;
+}
+
 function convertXYtoCanvas(data, event) {
 
     // Acquire the cursor position transformed to Canvas coordinates
     const [x, y] = [event.clientX, event.clientY];
-    const t = canvas.stage.worldTransform;
-    data.x = (x - t.tx) / canvas.stage.scale.x;
-    data.y = (y - t.ty) / canvas.stage.scale.y;
+    const t = canvas.app.stage.worldTransform;
+    data.x = (x - t.tx) / canvas.app.stage.scale.x;
+    data.y = (y - t.ty) / canvas.app.stage.scale.y;
 
     // Allow other modules to overwrite this, such as Isometric
     Hooks.callAll("dragDropPositioning", { event: event, data: data });
