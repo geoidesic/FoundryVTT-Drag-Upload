@@ -126,6 +126,12 @@ async function handleDrop(event) {
             canvas._onDrop?.(event);
             return;
         }
+        if (!url.startsWith("http")) {
+            console.log("DragUpload | Dragged non-URL text:", url);
+            // Let Foundry handle the event instead
+            canvas._onDrop?.(event);
+            return;
+        }
         // trimming query string
         if (url.includes("?")) url = url.substr(0, url.indexOf("?"))
         const splitUrl = url.split("/")
