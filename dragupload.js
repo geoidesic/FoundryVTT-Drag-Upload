@@ -50,12 +50,17 @@ Hooks.once('ready', async function() {
     await initializeDragUpload();
 
     // Enable binding
-    new DragDrop({
-        callbacks: {
-            drop: handleDrop
+    const canvasElement = document.getElementById("board");
+    canvasElement.addEventListener('dragover', (event) => {
+        // Only prevent default for file drops or HTTP URLs to allow drop
+        const hasFiles = event.dataTransfer.types.includes('Files');
+        const textData = event.dataTransfer.getData("Text");
+        const hasValidUrl = textData && textData.startsWith("http");
+        if (hasFiles || hasValidUrl) {
+            event.preventDefault();
         }
-    })
-    .bind(document.getElementById("board"));
+    });
+    canvasElement.addEventListener('drop', handleDrop);
 });
 
 async function initializeDragUpload() {
@@ -109,7 +114,6 @@ async function handlePlaylistDrop(event) {
 }
 
 async function handleDrop(event) {
-    event.preventDefault();
     console.debug("Got handleDrop event:");
     console.debug(event);
 
@@ -117,21 +121,22 @@ async function handleDrop(event) {
     console.debug("FileList is: ");
     console.debug(files);
 
+    // Only handle if there are files or a valid HTTP URL
+    const textData = event.dataTransfer.getData("Text");
+    const hasFiles = files && files.length > 0;
+    const hasValidUrl = textData && textData.startsWith("http");
+
+    if (!hasFiles && !hasValidUrl) {
+        // Not our event, let Foundry handle it
+        return;
+    }
+
+    // We will handle this event
+    event.preventDefault();
+
     let file
     if (!files || files.length === 0) {
-        let url = event.dataTransfer.getData("Text")
-        if (!url) {
-            console.log("DragUpload | No Files detected, exiting");
-            // Let Foundry handle the event instead
-            canvas._onDrop?.(event);
-            return;
-        }
-        if (!url.startsWith("http")) {
-            console.log("DragUpload | Dragged non-URL text:", url);
-            // Let Foundry handle the event instead
-            canvas._onDrop?.(event);
-            return;
-        }
+        let url = textData;
         // trimming query string
         if (url.includes("?")) url = url.substr(0, url.indexOf("?"))
         const splitUrl = url.split("/")
